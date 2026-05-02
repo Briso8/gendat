@@ -1,0 +1,52 @@
+name: Build GeoSite
+
+on:
+  schedule:
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+
+      - name: Clone external domains repository
+        run: |
+          # ВСТАВЬ СЮДА ССЫЛКУ НА НУЖНЫЙ РЕПОЗИТОРИЙ С ПАПКОЙ data
+          git clone https://github.com/v2fly/domain-list-community.git external-domains
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install dependencies
+        run: go mod tidy
+
+      - name: Generate GeoSite
+        # Передаем скрипту путь к клонированной папке data
+        run: go run main.go -mode geosite -data ./external-domains/data
+
+      - name: Force Push to release-geosite branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan release-geosite
+          git add geosite.dat
+          git commit -m "Update geosite.dat - $(date +'%Y-%m-%d')"
+          git push -f -u origin release-geosite
+
+      - name: Upload to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.TOKEN }}
+          file: geosite.dat
+          tag: "latest"
+          overwrite: true
+          release_name: "Daily Routing Data"

@@ -1,0 +1,10 @@
+{
+    "geosite": {
+        "google":["https://raw.githubusercontent.com/example/domain-list/main/google.txt"],
+        "meta":["https://raw.githubusercontent.com/example/domain-list/main/meta.txt"]
+    },
+    "geoip": {
+        "google": ["https://raw.githubusercontent.com/example/ip-list/main/google.txt"],
+        "telegram":["https://raw.githubusercontent.com/example/ip-list/main/telegram.txt"]
+    }
+}
