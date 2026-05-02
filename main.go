@@ -71,7 +71,7 @@ func buildGeoSite(dataDir string) {
 		var domainEntries[]*routercommon.Domain
 		for d := range domains {
 			domainEntries = append(domainEntries, &routercommon.Domain{
-				Type:  routercommon.Domain_Domain,
+				Type:  routercommon.Domain_Plain,
 				Value: d,
 			})
 		}
