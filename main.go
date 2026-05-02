@@ -71,7 +71,7 @@ func buildGeoSite(dataDir string) {
 		var domainEntries[]*routercommon.Domain
 		for d := range domains {
 			domainEntries = append(domainEntries, &routercommon.Domain{
-				Type:  routercommon.Domain_Plain,
+				Type:  routercommon.Domain_RootDomain,
 				Value: d,
 			})
 		}
@@ -92,31 +92,40 @@ func buildGeoSite(dataDir string) {
 
 // readLocalDomains читает файл и обрабатывает директивы "include:"
 func readLocalDomains(dir, filename string, domains map[string]struct{}) {
-	filePath := filepath.Join(dir, filename)
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Printf("Предупреждение: не удалось открыть %s (возможно, битая ссылка include)", filePath)
-		return
-	}
-	defer file.Close()
+    filePath := filepath.Join(dir, filename)
+    file, err := os.Open(filePath)
+    if err != nil {
+        log.Printf("Предупреждение: не удалось открыть %s", filePath)
+        return
+    }
+    defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        if line == "" || strings.HasPrefix(line, "#") {
+            continue
+        }
 
-		// Если строка содержит include:, рекурсивно читаем указанный файл
-		if strings.HasPrefix(line, "include:") {
-			includeFile := strings.TrimPrefix(line, "include:")
-			readLocalDomains(dir, includeFile, domains)
-			continue
-		}
+        // Если строка содержит include:
+        if strings.HasPrefix(line, "include:") {
+            includeStr := strings.TrimPrefix(line, "include:")
+            // Разбиваем строку по пробелам и берем только первое слово (имя файла), отсекая @ads и комментарии
+            includeFile := strings.Fields(includeStr)[0]
+            readLocalDomains(dir, includeFile, domains)
+            continue
+        }
 
-		// Дедупликация и добавление обычного домена
-		domains[strings.ToLower(line)] = struct{}{}
-	}
+        // Разбиваем строку домена по пробелам, чтобы отсечь атрибуты вроде @ads или @cn
+        domain := strings.Fields(line)[0]
+        
+        // На всякий случай очищаем от префиксов full: (для упрощения роутинга всё сводим к RootDomain)
+        domain = strings.TrimPrefix(domain, "full:")
+        domain = strings.TrimPrefix(domain, "domain:")
+
+        // Дедупликация и добавление очищенного домена
+        domains[strings.ToLower(domain)] = struct{}{}
+    }
 }
 
 // ---------------- GEOIP (Ссылки из конфига) ----------------
