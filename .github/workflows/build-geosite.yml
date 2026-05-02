@@ -17,7 +17,7 @@ jobs:
 
       - name: Clone external domains repository
         run: |
-          # ВСТАВЬ СЮДА ССЫЛКУ НА НУЖНЫЙ РЕПОЗИТОРИЙ С ПАПКОЙ data
+          # Ссылка на внешний репозиторий с папкой data
           git clone https://github.com/v2fly/domain-list-community.git external-domains
 
       - name: Setup Go
@@ -30,8 +30,8 @@ jobs:
         run: go mod tidy
 
       - name: Generate GeoSite
-        # Передаем скрипту путь к клонированной папке data
-        run: go run main.go -mode geosite -data ./external-domains/data
+        # Скрипт по умолчанию ищет папки ./external-domains/data, ./nash и файл config.json
+        run: go run main.go -data ./external-domains/data -nash ./nash -config config.json
 
       - name: Force Push to release-geosite branch
         run: |

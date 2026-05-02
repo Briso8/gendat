@@ -9,66 +9,72 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/v2fly/v2ray-core/v5/app/router/routercommon"
-	"go4.org/netipx"
 	"google.golang.org/protobuf/proto"
 )
 
 type Config struct {
-	GeoIP map[string][]string `json:"geoip"`
+	GeoSite map[string][]string `json:"geosite"`
 }
 
 func main() {
-	mode := flag.String("mode", "", "Режим работы: geosite или geoip")
-	dataDir := flag.String("data", "./external-domains/data", "Путь к клонированной папке data (для geosite)")
+	dataDir := flag.String("data", "./external-domains/data", "Путь к клонированной папке data")
+	nashDir := flag.String("nash", "./nash", "Путь к локальной папке с кастомными доменами")
+	configFile := flag.String("config", "config.json", "Конфигурационный файл со ссылками")
 	flag.Parse()
 
-	switch *mode {
-	case "geosite":
-		buildGeoSite(*dataDir)
-	case "geoip":
-		// Для GeoIP по-прежнему нужен config.json
-		configBytes, err := os.ReadFile("config.json")
-		if err != nil {
-			log.Fatalf("Ошибка чтения config.json: %v", err)
-		}
+	categories := make(map[string]map[string]struct{})
+
+	// 1. Читаем внешнюю папку data
+	log.Println("Чтение внешней папки data...")
+	readDirectory(*dataDir, categories, *dataDir)
+
+	// 2. Читаем локальную папку nash
+	log.Println("Чтение локальной папки nash...")
+	readDirectory(*nashDir, categories, *nashDir)
+
+	// 3. Читаем домены по URL из config.json
+	log.Println("Чтение ссылок из config.json...")
+	configBytes, err := os.ReadFile(*configFile)
+	if err == nil {
 		var cfg Config
 		if err := json.Unmarshal(configBytes, &cfg); err != nil {
-			log.Fatalf("Ошибка парсинга config.json: %v", err)
+			log.Printf("Ошибка парсинга %s: %v\n", *configFile, err)
+		} else {
+			for category, urls := range cfg.GeoSite {
+				if categories[category] == nil {
+					categories[category] = make(map[string]struct{})
+				}
+				for _, u := range urls {
+					lines := fetchLines(u)
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line == "" || strings.HasPrefix(line, "#") {
+							continue
+						}
+						// Используем специальную очистку ТОЛЬКО для файлов из config.json
+						domain := cleanRemoteDomain(line)
+						if domain != "" {
+							categories[category][domain] = struct{}{}
+						}
+					}
+				}
+			}
 		}
-		buildGeoIP(cfg.GeoIP)
-	default:
-		log.Fatal("Укажите режим: -mode geosite или -mode geoip")
+	} else {
+		log.Printf("Предупреждение: не удалось прочитать %s: %v\n", *configFile, err)
 	}
-}
 
-// ---------------- GEOSITE (Локальная папка) ----------------
-
-func buildGeoSite(dataDir string) {
+	// 4. Сборка итогового geosite.dat
+	log.Println("Сборка geosite.dat...")
 	var geositeList routercommon.GeoSiteList
 
-	files, err := os.ReadDir(dataDir)
-	if err != nil {
-		log.Fatalf("Ошибка чтения папки data (%s): %v", dataDir, err)
-	}
-
-	for _, file := range files {
-		if file.IsDir() {
-			continue // Игнорируем подпапки
-		}
-
-		category := file.Name() // Имя файла становится категорией
-		domains := make(map[string]struct{})
-
-		// Читаем домены рекурсивно (с поддержкой include:)
-		readLocalDomains(dataDir, category, domains)
-
-		var domainEntries[]*routercommon.Domain
+	for category, domains := range categories {
+		var domainEntries []*routercommon.Domain
 		for d := range domains {
 			domainEntries = append(domainEntries, &routercommon.Domain{
 				Type:  routercommon.Domain_RootDomain,
@@ -87,126 +93,82 @@ func buildGeoSite(dataDir string) {
 		log.Fatalf("Ошибка сборки GeoSite Protobuf: %v", err)
 	}
 	os.WriteFile("geosite.dat", data, 0644)
-	fmt.Println("geosite.dat успешно сгенерирован")
+	fmt.Println("geosite.dat успешно сгенерирован!")
 }
 
-// readLocalDomains читает файл и обрабатывает директивы "include:"
-func readLocalDomains(dir, filename string, domains map[string]struct{}) {
-    filePath := filepath.Join(dir, filename)
-    file, err := os.Open(filePath)
-    if err != nil {
-        log.Printf("Предупреждение: не удалось открыть %s", filePath)
-        return
-    }
-    defer file.Close()
-
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        line := strings.TrimSpace(scanner.Text())
-        if line == "" || strings.HasPrefix(line, "#") {
-            continue
-        }
-
-        // Если строка содержит include:
-        if strings.HasPrefix(line, "include:") {
-            includeStr := strings.TrimPrefix(line, "include:")
-            // Разбиваем строку по пробелам и берем только первое слово (имя файла), отсекая @ads и комментарии
-            includeFile := strings.Fields(includeStr)[0]
-            readLocalDomains(dir, includeFile, domains)
-            continue
-        }
-
-        // Разбиваем строку домена по пробелам, чтобы отсечь атрибуты вроде @ads или @cn
-        domain := strings.Fields(line)[0]
-        
-        // На всякий случай очищаем от префиксов full: (для упрощения роутинга всё сводим к RootDomain)
-        domain = strings.TrimPrefix(domain, "full:")
-        domain = strings.TrimPrefix(domain, "domain:")
-
-        // Дедупликация и добавление очищенного домена
-        domains[strings.ToLower(domain)] = struct{}{}
-    }
-}
-
-// ---------------- GEOIP (Ссылки из конфига) ----------------
-
-func buildGeoIP(categories map[string][]string) {
-	var geoipList routercommon.GeoIPList
-
-	for category, urls := range categories {
-		var cidrs []netip.Prefix
-		var singles[]netip.Addr
-		seen := make(map[string]struct{})
-
-		for _, u := range urls {
-			lines := fetchLines(u)
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line == "" || strings.HasPrefix(line, "#") {
-					continue
-				}
-				if _, ok := seen[line]; ok {
-					continue
-				}
-				seen[line] = struct{}{}
-
-				if strings.Contains(line, "/") {
-					pref, err := netip.ParsePrefix(line)
-					if err == nil && pref.Addr().Is4() {
-						cidrs = append(cidrs, pref)
-					}
-				} else {
-					ip, err := netip.ParseAddr(line)
-					if err == nil && ip.Is4() {
-						singles = append(singles, ip)
-					}
-				}
-			}
-		}
-
-		var builder netipx.IPSetBuilder
-		for _, c := range cidrs {
-			builder.AddPrefix(c)
-		}
-		ipSet, _ := builder.IPSet()
-
-		var finalCIDRs[]*routercommon.CIDR
-
-		// Добавляем неизменные подсети
-		for _, c := range cidrs {
-			ipBytes := c.Addr().As4()
-			finalCIDRs = append(finalCIDRs, &routercommon.CIDR{
-				Ip:     ipBytes[:],
-				Prefix: uint32(c.Bits()),
-			})
-		}
-
-		// Добавляем одиночные IP, если они НЕ входят в подсети
-		for _, ip := range singles {
-			if !ipSet.Contains(ip) {
-				ipBytes := ip.As4()
-				finalCIDRs = append(finalCIDRs, &routercommon.CIDR{
-					Ip:     ipBytes[:],
-					Prefix: 32,
-				})
-			}
-		}
-
-		geoipList.Entry = append(geoipList.Entry, &routercommon.GeoIP{
-			CountryCode: strings.ToUpper(category),
-			Cidr:        finalCIDRs,
-		})
-	}
-
-	data, err := proto.Marshal(&geoipList)
+// readDirectory читает все файлы в папке и добавляет их в общую мапу категорий
+func readDirectory(dir string, categories map[string]map[string]struct{}, baseDir string) {
+	files, err := os.ReadDir(dir)
 	if err != nil {
-		log.Fatalf("Ошибка сборки GeoIP Protobuf: %v", err)
+		log.Printf("Предупреждение: папка %s не прочитана: %v\n", dir, err)
+		return
 	}
-	os.WriteFile("geoip.dat", data, 0644)
-	fmt.Println("geoip.dat успешно сгенерирован")
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue // Игнорируем подпапки
+		}
+
+		category := file.Name()
+		if categories[category] == nil {
+			categories[category] = make(map[string]struct{})
+		}
+
+		readLocalDomains(baseDir, category, categories[category])
+	}
 }
 
-func fetchLines(url string)[]string {
+// readLocalDomains читает конкретный файл и рекурсивно обрабатывает директивы include:
+func readLocalDomains(baseDir, filename string, domains map[string]struct{}) {
+	filePath := filepath.Join(baseDir, filename)
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("Предупреждение: не удалось открыть %s\n", filePath)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "include:") {
+			includeStr := strings.TrimPrefix(line, "include:")
+			includeFile := strings.Fields(includeStr)[0]
+			readLocalDomains(baseDir, includeFile, domains)
+			continue
+		}
+
+		// Используем очистку для локальных файлов (без удаления префикса domain:)
+		domain := cleanLocalDomain(line)
+		if domain != "" {
+			domains[domain] = struct{}{}
+		}
+	}
+}
+
+// cleanLocalDomain очищает строки из папок data и nash
+func cleanLocalDomain(line string) string {
+	domain := strings.Fields(line)[0]
+	// ВАЖНО: по твоей просьбе мы НЕ убираем "domain:" в локальных файлах
+	domain = strings.TrimPrefix(domain, "full:")
+	return strings.ToLower(domain)
+}
+
+// cleanRemoteDomain очищает строки из файлов, скачанных по ссылкам в config.json
+func cleanRemoteDomain(line string) string {
+	domain := strings.Fields(line)[0]
+	// Убираем префикс "domain:" только здесь
+	domain = strings.TrimPrefix(domain, "domain:") 
+	domain = strings.TrimPrefix(domain, "full:")
+	return strings.ToLower(domain)
+}
+
+// fetchLines скачивает файл по ссылке и разбивает его на строки
+func fetchLines(url string) []string {
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Printf("Ошибка скачивания %s: %v\n", url, err)
@@ -216,7 +178,7 @@ func fetchLines(url string)[]string {
 
 	body, _ := io.ReadAll(resp.Body)
 	scanner := bufio.NewScanner(bytes.NewReader(body))
-	var lines[]string
+	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
