@@ -1,0 +1,6 @@
+{
+    "geosite": {
+        "whitelist": ["https://github.com/hydraponique/roscomvpn-geosite/raw/refs/heads/master/data/whitelist"],
+        "twitchads": ["https://github.com/hydraponique/roscomvpn-geosite/raw/refs/heads/master/data/twitch-ads"]
+    }
+}
