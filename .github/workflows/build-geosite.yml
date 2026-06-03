@@ -14,10 +14,11 @@ jobs:
     steps:
       - name: Checkout main repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Clone external domains repository
         run: |
-          # Ссылка на внешний репозиторий с папкой data
           git clone https://github.com/v2fly/domain-list-community.git external-domains
 
       - name: Setup Go
@@ -30,14 +31,23 @@ jobs:
         run: go mod tidy
 
       - name: Generate GeoSite
-        # Скрипт по умолчанию ищет папки ./external-domains/data, ./nash и файл config.json
         run: go run main.go -data ./external-domains/data -nash ./nash -config config.json
 
-      - name: Force Push to release-geosite branch
+      - name: Keepalive Workflow
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git checkout main
+          
+          git commit --allow-empty -m "Chore: Keepalive cron subscription $(date +'%Y-%m-%d')"
+          git push origin main
+
+      - name: Force Push to release-geosite branch
+        run: |
           git checkout --orphan release-geosite
+          git rm -rf . --quiet || true
+          
           git add geosite.dat
           git commit -m "Update geosite.dat - $(date +'%Y-%m-%d')"
           git push -f -u origin release-geosite
