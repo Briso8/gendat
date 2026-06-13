@@ -48,7 +48,7 @@ jobs:
           git checkout --orphan release-geosite
           git rm -rf . --quiet || true
           
-          git add geositebr.dat
+          git add geosite.dat
           git commit -m "Update geositebr.dat - $(date +'%Y-%m-%d')"
           git push -f -u origin release-geosite
 
