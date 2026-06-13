@@ -30,10 +30,8 @@ jobs:
       - name: Install dependencies
         run: go mod tidy
 
-      - name: Generate GeoSite Files
-        run: |
-          go run main.go -data ./external-domains/data -nash ./nash -config config.json
-
+      - name: Generate GeoSite
+        run: go run main.go -data ./external-domains/data -nash ./nash -config config.json
 
       - name: Keepalive Workflow
         run: |
@@ -49,18 +47,16 @@ jobs:
         run: |
           git checkout --orphan release-geosite
           git rm -rf . --quiet || true
-         
-          git add geositebr.dat geosite.dat geositexr.dat
           
-          git commit -m "Update geosite files - $(date +'%Y-%m-%d')"
+          git add geosite.dat
+          git commit -m "Update geosite.dat - $(date +'%Y-%m-%d')"
           git push -f -u origin release-geosite
 
       - name: Upload to Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file_glob: true
-          file: "*.dat"
+          file: geosite.dat
           tag: "latest"
           overwrite: true
           release_name: "Daily Routing Data"
