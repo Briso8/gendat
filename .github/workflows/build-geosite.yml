@@ -33,9 +33,6 @@ jobs:
       - name: Generate GeoSite
         run: go run main.go -data ./external-domains/data -nash ./nash -config config.json
 
-      - name: Create geositexr.dat copy
-        run: cp geosite.dat geositexr.dat
-
       - name: Keepalive Workflow
         run: |
           git config --global user.name "github-actions[bot]"
@@ -51,24 +48,15 @@ jobs:
           git checkout --orphan release-geosite
           git rm -rf . --quiet || true
           
-          git add geosite.dat geositexr.dat
-          git commit -m "Update geosite files - $(date +'%Y-%m-%d')"
+          git add geosite.dat
+          git commit -m "Update geosite.dat - $(date +'%Y-%m-%d')"
           git push -f -u origin release-geosite
 
-      - name: Upload geosite.dat to Release
+      - name: Upload to Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: geosite.dat
-          tag: "latest"
-          overwrite: true
-          release_name: "Daily Routing Data"
-
-      - name: Upload geositexr.dat to Release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: geositexr.dat
           tag: "latest"
           overwrite: true
           release_name: "Daily Routing Data"
